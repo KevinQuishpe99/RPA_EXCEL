@@ -19,6 +19,7 @@ class VentanaPrincipalQt(QWidget):
 
         self.archivo_origen = None
         self.ruta_temporal_resultado = None
+        self.nombre_archivo_sugerido = "archivo_transformado.xlsx"
 
         self._build_ui()
         # Aplicar fondo blanco al final para no interferir con gradientes
@@ -76,13 +77,21 @@ class VentanaPrincipalQt(QWidget):
         archivo_row = QHBoxLayout()
         self.lbl_archivo = QLabel("No seleccionado")
         self.lbl_archivo.setStyleSheet("background:#F5F5F5;padding:12px 14px;border-radius:8px;color:#333333;border:1px solid #CCCCCC")
+        # Balance row width: give the path label a bit more stretch
         archivo_row.addWidget(self.lbl_archivo, 1)
 
         self.btn_seleccionar = QPushButton("SELECCIONAR")
+        # Make the select button slightly wider and taller to be comfortable
         self.btn_seleccionar.setStyleSheet(
-            "QPushButton{border-radius:8px;padding:10px 16px;background:#FFFFFF;color:#333333;border:1px solid #CCCCCC;}"
+            "QPushButton{border-radius:8px;padding:8px 14px;background:#FFFFFF;color:#333333;border:1px solid #CCCCCC;min-width: 120px;}"
             "QPushButton:hover{background:#F5F5F5;}"
         )
+        try:
+            # Harmonize button dimensions
+            self.btn_seleccionar.setFixedWidth(130)
+            self.btn_seleccionar.setFixedHeight(36)
+        except Exception:
+            pass
         self.btn_seleccionar.clicked.connect(self._seleccionar_archivo)
         archivo_row.addWidget(self.btn_seleccionar)
         sec_archivo.addLayout(archivo_row)
@@ -96,7 +105,51 @@ class VentanaPrincipalQt(QWidget):
 
         self.combo_tipo = QComboBox()
         self.combo_tipo.setEnabled(False)
-        self.combo_tipo.setStyleSheet("QComboBox{padding:8px;border:1px solid #CCCCCC;border-radius:8px;background:#F5F5F5;color:#333333;} QComboBox::drop-down{width:24px;}")
+        # Set a comfortable width/height for the combo box
+        try:
+            self.combo_tipo.setFixedWidth(260)
+            self.combo_tipo.setFixedHeight(34)
+        except Exception:
+            pass
+        self.combo_tipo.setStyleSheet("""
+            QComboBox{
+                padding:8px 10px;
+                border:1px solid #CCCCCC;
+                border-radius:8px;
+                background:#FFFFFF;
+                color:#333333;
+                font-size:11px; /* Revert to original size */
+                min-width: 220px; /* ensure enough width */
+            }
+            QComboBox::drop-down{
+                width:20px;
+                border:none;
+                background:#FFFFFF;
+            }
+            QComboBox::down-arrow{
+                image:none;
+                width:0px;
+            }
+            QComboBox QAbstractItemView{
+                background:#FFFFFF;
+                color:#333333;
+                selection-background-color:#FF6347; /* tomato */
+                selection-color:#333333; /* keep text dark so it's readable */
+                border:1px solid #CCCCCC;
+                padding:0px;
+                margin:0px;
+                font-size:11px;
+            }
+            QComboBox QAbstractItemView::item{
+                padding:8px;
+                height:25px;
+            }
+            QComboBox QAbstractItemView::item:hover{
+                background:#FFE4E1; /* light tomato hover */
+            }
+        """)
+        # Agregar mensaje de placeholder
+        self.combo_tipo.addItem("Seleccionar tipo de archivo...")
         self.combo_tipo.currentIndexChanged.connect(self._on_tipo_cambiado)
         sec_tipo.addWidget(self.combo_tipo)
         root.addLayout(sec_tipo)
@@ -180,11 +233,13 @@ class VentanaPrincipalQt(QWidget):
     # ===== Public API for controller =====
     def set_polizas(self, nombres):
         self.combo_tipo.clear()
+        self.combo_tipo.addItem("Seleccionar tipo de archivo...")  # Placeholder
         self.combo_tipo.addItems(nombres)
-        self.combo_tipo.setCurrentIndex(-1)  # Sin selección inicial
+        self.combo_tipo.setCurrentIndex(0)  # Mostrar placeholder por defecto
 
-    def set_archivo_resultado_temp(self, ruta):
+    def set_archivo_resultado_temp(self, ruta, nombre_sugerido=None):
         self.ruta_temporal_resultado = ruta
+        self.nombre_archivo_sugerido = nombre_sugerido if nombre_sugerido else "archivo_transformado.xlsx"
         self.btn_descargar.setEnabled(True)
         self.btn_transformar.setEnabled(False)
 
@@ -221,7 +276,7 @@ class VentanaPrincipalQt(QWidget):
 
     # ===== Internal slots =====
     def _seleccionar_archivo(self):
-        ruta, _ = QFileDialog.getOpenFileName(self, "Seleccionar archivo 413", filter="Excel (*.xlsx)")
+        ruta, _ = QFileDialog.getOpenFileName(self, "Seleccionar archivo de origen (413 o 455)", filter="Excel (*.xlsx)")
         if ruta:
             self.archivo_origen = ruta
             self.lbl_archivo.setText(ruta.split('/')[-1])
@@ -230,7 +285,8 @@ class VentanaPrincipalQt(QWidget):
             self.archivo_seleccionado.emit(ruta)
 
     def _on_tipo_cambiado(self, idx):
-        if idx >= 0:
+        # idx=0 es el placeholder "Seleccionar tipo de archivo..."
+        if idx > 0:
             self.btn_transformar.setEnabled(True)
         else:
             self.btn_transformar.setEnabled(False)
@@ -238,7 +294,13 @@ class VentanaPrincipalQt(QWidget):
     def _descargar(self):
         if not self.ruta_temporal_resultado:
             return
-        destino, _ = QFileDialog.getSaveFileName(self, "Guardar resultado", filter="Excel (*.xlsx)")
+        # Usar nombre sugerido como nombre inicial
+        destino, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Guardar archivo transformado",
+            self.nombre_archivo_sugerido,  # Nombre inicial sugerido
+            "Excel (*.xlsx)"
+        )
         if destino:
             self.descargar_resultado.emit(self.ruta_temporal_resultado, destino)
 
@@ -258,6 +320,16 @@ class VentanaPrincipalQt(QWidget):
         self.text_estado.clear()
         if hasattr(self, 'lbl_porcentaje'):
             self.lbl_porcentaje.setText("0%")
+
+    def habilitar_controles(self, habilitado=True):
+        """Habilita/deshabilita los controles principales durante transformación"""
+        self.btn_seleccionar.setEnabled(habilitado)
+        # Solo habilitar transformar si hay póliza seleccionada
+        if habilitado and self.combo_tipo.currentIndex() >= 0:
+            self.btn_transformar.setEnabled(True)
+        else:
+            self.btn_transformar.setEnabled(False)
+        self.combo_tipo.setEnabled(habilitado)
 
     # ===== UI helpers =====
     # Métodos _make_pill y _set_pill_state eliminados (sección ESTADO removida)

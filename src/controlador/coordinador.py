@@ -176,10 +176,62 @@ class CoordinadorPrincipal:
             except Exception:
                 pass
             
+            # Determinar plantilla según póliza (DV -> 5852, TC -> 5924)
+            import os
+            plantilla_nombre = 'plantilla5852.xlsx'
+            try:
+                prefijo = str(poliza_config.get('prefijo', '')).upper()
+            except Exception:
+                prefijo = ''
+            if prefijo == 'TC':
+                plantilla_nombre = 'plantilla5924.xlsx'
+
+            posibles_rutas = [
+                os.path.join(os.getcwd(), 'src', 'plantillas', plantilla_nombre),
+                os.path.join(os.getcwd(), 'plantillas', plantilla_nombre),
+                os.path.join(os.getcwd(), plantilla_nombre),
+            ]
+
+            ruta_plantilla_elegida = None
+            for rp in posibles_rutas:
+                if os.path.exists(rp):
+                    ruta_plantilla_elegida = rp
+                    break
+
+            if not ruta_plantilla_elegida:
+                raise Exception(f"No se encontró la plantilla requerida: {plantilla_nombre}")
+
+            # Validar que el archivo origen contiene la hoja requerida según póliza
+            hoja_requerida = poliza_config.get('hoja_origen_requerida') if isinstance(poliza_config, dict) else None
+            if hoja_requerida:
+                try:
+                    from openpyxl import load_workbook
+                    wb_origen = load_workbook(self.archivo_actual.ruta, read_only=True, data_only=True)
+                    nombres_hojas = [str(n) for n in wb_origen.sheetnames]
+                    if hoja_requerida not in nombres_hojas:
+                        msg = (
+                            f"El archivo seleccionado no contiene la hoja requerida para la póliza seleccionada.\n\n"
+                            f"Póliza: {poliza_config.get('prefijo','')}\n"
+                            f"Hoja requerida: {hoja_requerida}\n"
+                            f"Hojas encontradas: {', '.join(nombres_hojas)}\n\n"
+                            f"Para DV (5852) se espera un archivo 413. Para TC (5924) se espera un archivo 455."
+                        )
+                        self.vista.mostrar_error("Hoja requerida no encontrada", msg)
+                        # Re-habilitar controles y abortar
+                        try:
+                            if hasattr(self.vista, 'habilitar_controles'):
+                                self.vista.habilitar_controles(True)
+                        except Exception:
+                            pass
+                        return
+                except Exception:
+                    # Si no se puede leer, continuar y dejar que el transformador reporte el error
+                    pass
+
             # Ejecutar transformación
             wb_resultado, nombre_descarga = transformador.transformar(
                 archivo_origen=self.archivo_actual.ruta,
-                archivo_plantilla=self.archivo_plantilla.ruta,
+                archivo_plantilla=ruta_plantilla_elegida,
                 poliza_info=poliza_config
             )
             # Avance después de transformar exitosamente
@@ -198,12 +250,12 @@ class CoordinadorPrincipal:
             except Exception:
                 pass
             
-            # Establecer archivo para descargar
+            # Establecer archivo para descargar con nombre sugerido
             try:
                 if hasattr(self.vista, 'establecer_archivo_resultado'):
-                    self.vista.establecer_archivo_resultado(ruta_temp)
+                    self.vista.establecer_archivo_resultado(ruta_temp, nombre_descarga)
                 elif hasattr(self.vista, 'set_archivo_resultado_temp'):
-                    self.vista.set_archivo_resultado_temp(ruta_temp)
+                    self.vista.set_archivo_resultado_temp(ruta_temp, nombre_descarga)
             except Exception:
                 pass
             # Resaltar descarga y bloquear transformar
@@ -311,7 +363,5 @@ class CoordinadorPrincipal:
         except Exception:
             pass
             
-        except Exception as e:
-            self.vista.mostrar_error("Error", f"No se pudo guardar el archivo:\n{str(e)}")
 
 

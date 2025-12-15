@@ -18,15 +18,23 @@ class TransferenciaDatos:
         self._formulas_pattern = formulas_pattern
         self._headers_cache = {}
     
-    def transferir_datos(self, ws, df_origen, fila_encabezados, headers_origen, mapeo, callback=None):
+    def transferir_datos(self, ws, df_origen, fila_encabezados, headers_origen, headers_destino, mapeo, callback=None, fila_destino_inicio=6, fila_plantilla=6, poliza_info=None):
         """Transfiere datos de origen a destino replicando la lógica original"""
-        fila_destino = 6
+        fila_destino = fila_destino_inicio
         filas_procesadas = 0
-
-        headers_destino = list(ws[5])
         fila_origen_inicio = fila_encabezados + 1
         limite_origen = len(df_origen)
-        primera_columna_array = df_origen.iloc[fila_origen_inicio:, 0].values
+        
+        # Para TC, la primera columna podría estar vacía - buscar primera columna mapeada
+        col_validacion = 0
+        if poliza_info and poliza_info.get('prefijo') == 'TC':
+            # Encontrar la primera columna mapeada (generalmente será 1 o mayor)
+            if mapeo:
+                col_indices = sorted([k for k in mapeo.keys() if isinstance(k, int)])
+                if col_indices and col_indices[0] > 0:
+                    col_validacion = col_indices[0]
+        
+        primera_columna_array = df_origen.iloc[fila_origen_inicio:, col_validacion].values
 
         # Índices cacheados para columnas especiales
         idx_pais_residencia_dest = self._cache_indices_columnas.get('idx_pais_residencia_dest')
@@ -110,6 +118,8 @@ class TransferenciaDatos:
                     headers_destino,
                     idx_pais_origen,
                     idx_pais_residencia_dest,
+                    fila_plantilla=fila_plantilla,
+                    poliza_info=poliza_info,
                 )
                 filas_procesadas += 1
                 fila_destino += 1
@@ -120,9 +130,8 @@ class TransferenciaDatos:
 
     def transferir_fila_optimizada(self, df_origen, idx_origen, ws_destino, fila_destino,
                                    mapeo_columnas, headers_origen, headers_destino,
-                                   idx_pais_origen=None, idx_pais_residencia_dest=None):
+                                   idx_pais_origen=None, idx_pais_residencia_dest=None, fila_plantilla=6, poliza_info=None):
         """Copia fórmulas y datos aplicando las mismas transformaciones del monolito"""
-        fila_plantilla = 6
         row_origen = df_origen.iloc[idx_origen]
 
         # Detectar tipo de identificación
@@ -188,28 +197,35 @@ class TransferenciaDatos:
         # Paso 2: copiar datos mapeados con transformaciones
         self._aplicar_transformaciones(
             df_origen, idx_origen, ws_destino, fila_destino, mapeo_columnas,
-            headers_origen, headers_destino, tipo_identificacion, idx_pais_origen
+            headers_origen, headers_destino, tipo_identificacion, idx_pais_origen, poliza_info
         )
 
-        # Paso 3: establecer PAIS DE RESIDENCIA en 239
-        if idx_pais_residencia_dest is not None:
-            try:
-                cell_destino = ws_destino.cell(fila_destino, idx_pais_residencia_dest)
-                if not isinstance(cell_destino, MergedCell) and cell_destino.data_type != 'f':
-                    cell_destino.value = '239'
-            except Exception:
-                pass
-
-        # Paso 4: escribir número de póliza fijo 5852
-        self._escribir_numero_poliza(ws_destino, fila_destino, headers_destino)
-
-        # Paso 5: escribir nombre producto fijo
-        self._escribir_nombre_producto(ws_destino, fila_destino, headers_destino)
+        # Paso 3: aplicar campos fijos según póliza (DESPUÉS de copiar datos para sobrescribir)
+        if poliza_info and poliza_info.get('prefijo') == 'TC':
+            # Para TC, aplicar campos fijos específicos
+            self._aplicar_campos_fijos_tc(ws_destino, fila_destino, headers_destino, poliza_info)
+        else:
+            # Para DV, aplicar campos fijos tradicionales
+            if idx_pais_residencia_dest is not None:
+                try:
+                    cell_destino = ws_destino.cell(fila_destino, idx_pais_residencia_dest)
+                    if not isinstance(cell_destino, MergedCell) and cell_destino.data_type != 'f':
+                        cell_destino.value = '239'
+                except Exception:
+                    pass
+            self._escribir_numero_poliza(ws_destino, fila_destino, headers_destino)
+            self._escribir_nombre_producto(ws_destino, fila_destino, headers_destino)
 
     def _aplicar_transformaciones(self, df_origen, idx_origen, ws_destino, fila_destino,
                                   mapeo_columnas, headers_origen, headers_destino,
-                                  tipo_identificacion, idx_pais_origen):
+                                  tipo_identificacion, idx_pais_origen, poliza_info=None):
         """Aplica transformaciones de datos según tipo de columna"""
+        # Importar constantes TC si es necesario
+        no_sobrescribir_tc = set()
+        if poliza_info and poliza_info.get('prefijo') == 'TC':
+            from .mapeo_tc import NO_SOBRESCRIBIR_TC
+            no_sobrescribir_tc = NO_SOBRESCRIBIR_TC
+        
         row_origen = df_origen.iloc[idx_origen]
         valor_pais_origen = None
         
@@ -224,6 +240,11 @@ class TransferenciaDatos:
 
         for idx_origen_col, col_destino in mapeo_columnas.items():
             try:
+                # Para TC, no sobrescribir ciertas columnas (tienen fórmulas)
+                # col_destino es 1-based, pero NO_SOBRESCRIBIR_TC usa índices 0-based
+                if (col_destino - 1) in no_sobrescribir_tc:
+                    continue
+                
                 if idx_origen_col >= len(row_values):
                     continue
 
@@ -249,7 +270,7 @@ class TransferenciaDatos:
                     header_orig = self._headers_cache[idx_origen_col]
 
                     # Aplicar transformación según tipo de columna
-                    valor = self._transformar_valor(valor, valor_str, header_orig, col_destino, tipo_identificacion)
+                    valor = self._transformar_valor(valor, valor_str, header_orig, col_destino, tipo_identificacion, poliza_info)
 
                 cell_destino.value = valor
                 
@@ -261,61 +282,68 @@ class TransferenciaDatos:
             except Exception:
                 continue
 
-    def _transformar_valor(self, valor, valor_str, header_orig, col_destino, tipo_identificacion):
+    def _transformar_valor(self, valor, valor_str, header_orig, col_destino, tipo_identificacion, poliza_info=None):
         """Aplica transformación específica según el tipo de columna"""
-        if 'PROVINCIA' in header_orig or 'CIUDAD' in header_orig:
-            if isinstance(valor, (int, float)):
-                return int(valor)
-            elif isinstance(valor_str, str) and valor_str:
-                if len(valor_str) > 1 and valor_str[0] == '0' and valor_str[1:].isdigit():
-                    return int(valor_str[1:])
-                elif valor_str.isdigit():
-                    return int(valor_str)
-                try:
-                    if valor_str.replace('.', '', 1).replace('-', '', 1).isdigit():
-                        return int(float(valor_str))
-                except Exception:
-                    pass
-            return valor_str
+        header_upper = header_orig.upper() if header_orig else ""
         
-        elif 'NACIONALIDAD' in header_orig:
-            return '239' if tipo_identificacion in ('00', '0') else valor_str
+        # Columnas numéricas que deben ser enteros sin ceros adelante
+        numeras_sin_ceros_patterns = [
+            'PROVINCIA' in header_upper and 'PAIS' not in header_upper,
+            'CIUDAD' in header_upper,
+            'NACIONALIDAD' in header_upper,
+            'PAIS DE RESIDENCIA' in header_upper,
+            'PAIS DE ORIGEN' in header_upper,
+        ]
         
-        elif 'PAIS DE ORIGEN' in header_orig or 'PAÍS DE ORIGEN' in header_orig:
-            if col_destino == 13:
-                try:
-                    if isinstance(valor, (int, float)):
-                        return int(valor)
+        # Listas de columnas decimales
+        decimales_patterns = [
+            'MONTO CREDITO' in header_upper,
+            'MONTO CRÉDITO' in header_upper,
+            'PLAZO DE CREDITO' in header_upper or 'PLAZO DE CRÉDITO' in header_upper,
+            'PRIMA NETA' in header_upper,
+            'INGRESOS' in header_upper,
+            'PATRIMONIO' in header_upper,
+            'SALDO' in header_upper and 'FECHA' not in header_upper,
+        ]
+        
+        # Aplicar conversión de números sin ceros adelante
+        if any(numeras_sin_ceros_patterns):
+            try:
+                if isinstance(valor, (int, float)):
+                    return int(valor)
+                elif isinstance(valor_str, str) and valor_str:
+                    # Quitar ceros iniciales
+                    if len(valor_str) > 1 and valor_str[0] == '0' and valor_str[1:].isdigit():
+                        return int(valor_str[1:])
                     elif valor_str.isdigit():
                         return int(valor_str)
-                    elif valor_str.replace('.', '', 1).replace('-', '', 1).isdigit():
-                        return int(float(valor_str))
-                except Exception:
-                    pass
+                    try:
+                        if valor_str.replace('.', '', 1).replace('-', '', 1).isdigit():
+                            return int(float(valor_str))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return valor_str
         
-        elif 'MONTO CREDITO' in header_orig or 'MONTO CRÉDITO' in header_orig:
+        # Aplicar decimales limitados a 2
+        if any(decimales_patterns):
             try:
                 return round(float(valor), 2)
             except Exception:
                 return valor_str
         
-        elif 'PLAZO DE CREDITO' in header_orig or 'PLAZO DE CRÉDITO' in header_orig:
-            try:
-                return round(float(valor), 2)
-            except Exception:
-                return valor_str
-        
-        elif 'FECHA' in header_orig:
+        # Manejo de fechas
+        if 'FECHA' in header_upper:
             try:
                 fecha_obj = None
                 if isinstance(valor, (datetime, pd.Timestamp)):
                     fecha_obj = valor.date() if hasattr(valor, 'date') else valor
-                elif isinstance(valor, str):
-                    if ' ' in valor:
-                        valor = valor.split(' ')[0]
-                    if '-' in valor or '/' in valor:
-                        fecha_parsed = pd.to_datetime(valor)
+                elif isinstance(valor_str, str):
+                    if ' ' in valor_str:
+                        valor_str = valor_str.split(' ')[0]
+                    if '-' in valor_str or '/' in valor_str:
+                        fecha_parsed = pd.to_datetime(valor_str)
                         fecha_obj = fecha_parsed.date() if hasattr(fecha_parsed, 'date') else fecha_parsed
                 if fecha_obj:
                     return fecha_obj.date() if hasattr(fecha_obj, 'date') else fecha_obj
@@ -324,8 +352,58 @@ class TransferenciaDatos:
         
         return valor_str
 
+    def _aplicar_campos_fijos_tc(self, ws_destino, fila_destino, headers_destino, poliza_info):
+        """Aplica valores fijos específicos de la póliza TC - sobrescribe datos mapeados"""
+        if not poliza_info:
+            return
+        
+        # NUMERO DE POLIZA fijo (5924)
+        numero_poliza = poliza_info.get('numero_poliza_fijo')
+        if numero_poliza:
+            for idx, cell in enumerate(headers_destino):
+                if cell.value:
+                    header_upper = str(cell.value).upper()
+                    if 'NUMERO' in header_upper and 'POLIZA' in header_upper:
+                        try:
+                            cell_destino = ws_destino.cell(fila_destino, idx + 1)
+                            if not isinstance(cell_destino, MergedCell) and cell_destino.data_type != 'f':
+                                cell_destino.value = numero_poliza
+                                break
+                        except Exception:
+                            pass
+        
+        # NOMBRE PRODUCTO fijo
+        nombre_producto = poliza_info.get('nombre_producto_fijo')
+        if nombre_producto:
+            for idx, cell in enumerate(headers_destino):
+                if cell.value:
+                    header_upper = str(cell.value).upper()
+                    if 'NOMBRE' in header_upper and 'PRODUCTO' in header_upper:
+                        try:
+                            cell_destino = ws_destino.cell(fila_destino, idx + 1)
+                            if not isinstance(cell_destino, MergedCell) and cell_destino.data_type != 'f':
+                                cell_destino.value = nombre_producto
+                                break
+                        except Exception:
+                            pass
+        
+        # PAIS DE RESIDENCIA fijo (239)
+        pais_residencia = poliza_info.get('pais_residencia_fijo')
+        if pais_residencia:
+            for idx, cell in enumerate(headers_destino):
+                if cell.value:
+                    header_upper = str(cell.value).upper()
+                    if 'PAIS' in header_upper and 'RESIDENCIA' in header_upper:
+                        try:
+                            cell_destino = ws_destino.cell(fila_destino, idx + 1)
+                            if not isinstance(cell_destino, MergedCell) and cell_destino.data_type != 'f':
+                                cell_destino.value = pais_residencia
+                                break
+                        except Exception:
+                            pass
+
     def _escribir_numero_poliza(self, ws_destino, fila_destino, headers_destino):
-        """Escribe número de póliza fijo 5852"""
+        """Escribe número de póliza fijo para DV (5852)"""
         if not hasattr(self, '_idx_numero_poliza'):
             self._idx_numero_poliza = None
             for idx, cell in enumerate(headers_destino):
@@ -341,7 +419,7 @@ class TransferenciaDatos:
                 pass
 
     def _escribir_nombre_producto(self, ws_destino, fila_destino, headers_destino):
-        """Escribe nombre producto fijo"""
+        """Escribe nombre producto fijo para DV (MONTO DEL CREDITO)"""
         if not hasattr(self, '_idx_nombre_producto'):
             self._idx_nombre_producto = None
             for idx, cell in enumerate(headers_destino):
