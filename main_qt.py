@@ -13,15 +13,16 @@ def main():
         
         app = QApplication(sys.argv)
         ventana = VentanaPrincipalQt()
+        ventana.show()
         
-        # Conectar el coordinador
+        # Conectar el coordinador después de mostrar la ventana
         coordinador = CoordinadorPrincipal(ventana)
         
-        # Mensaje inicial
-        ventana.add_message("✓ Sistema listo para transformar archivos")
-        ventana.add_message("✓ Selecciona archivo 413 (DV) o 455 (TC)")
+        # Mensaje inicial (después de mostrar para evitar congelamiento)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: ventana.add_message("✓ Sistema listo para transformar archivos"))
+        QTimer.singleShot(200, lambda: ventana.add_message("✓ Selecciona archivo 413 (DV) o 455 (TC)"))
         
-        ventana.show()
         return app.exec()
     except Exception as e:
         error_msg = f"Error al iniciar la aplicación:\n{str(e)}\n\n{traceback.format_exc()}"

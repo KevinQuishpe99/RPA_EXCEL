@@ -164,9 +164,11 @@ class CoordinadorPrincipal:
         import os
         import tempfile
         
+        print("[DEBUG] Iniciando _ejecutar_transformacion")
         try:
             # Crear transformador con callback de mensajes
             contador_mensajes = {'count': 0}
+            print("[DEBUG] Contador de mensajes creado")
             
             def callback_mensaje(msg):
                 self._add_msg(msg + "\n")
@@ -174,16 +176,17 @@ class CoordinadorPrincipal:
                 try:
                     contador_mensajes['count'] += 1
                     # Incremento pequeño y constante: +1% por cada mensaje hasta 75%
-                    valor_actual = getattr(self.vista.barra_progreso, 'value', 20)
-                    siguiente = min(75, int(valor_actual) + 1)
-                    self._set_progress(siguiente)
-                except Exception:
-                    pass
+                    # Usar _set_progress que ya está optimizado con _en_ui
+                    self._set_progress(min(75, 20 + contador_mensajes['count']))
+                except Exception as e:
+                    print(f"[ERROR callback] {e}")
             
             transformador = TransformadorDatos(callback_mensaje=callback_mensaje)
+            print("[DEBUG] Transformador creado")
             
             # Obtener configuración de póliza
             poliza_config = self.poliza_actual.config
+            print("[DEBUG] Configuración de póliza obtenida")
             # Avance antes de transformar
             try:
                 self._set_progress(25)
@@ -199,12 +202,14 @@ class CoordinadorPrincipal:
                 prefijo = ''
             if prefijo == 'TC':
                 plantilla_nombre = 'plantilla5924.xlsx'
+            print(f"[DEBUG] Plantilla seleccionada: {plantilla_nombre}")
 
             posibles_rutas = [
                 os.path.join(os.getcwd(), 'src', 'plantillas', plantilla_nombre),
                 os.path.join(os.getcwd(), 'plantillas', plantilla_nombre),
                 os.path.join(os.getcwd(), plantilla_nombre),
             ]
+            print(f"[DEBUG] Rutas a buscar: {posibles_rutas}")
 
             ruta_plantilla_elegida = None
             for rp in posibles_rutas:
@@ -214,6 +219,7 @@ class CoordinadorPrincipal:
 
             if not ruta_plantilla_elegida:
                 raise Exception(f"No se encontró la plantilla requerida: {plantilla_nombre}")
+            print(f"[DEBUG] Plantilla encontrada: {ruta_plantilla_elegida}")
 
             # Validar que el archivo origen contiene la hoja requerida según póliza
             hoja_requerida = poliza_config.get('hoja_origen_requerida') if isinstance(poliza_config, dict) else None
@@ -243,54 +249,73 @@ class CoordinadorPrincipal:
                     pass
 
             # Ejecutar transformación
+            print("[DEBUG] Iniciando transformación")
             wb_resultado, nombre_descarga = transformador.transformar(
                 archivo_origen=self.archivo_actual.ruta,
                 archivo_plantilla=ruta_plantilla_elegida,
                 poliza_info=poliza_config
             )
+            print(f"[DEBUG] Transformación completada: {nombre_descarga}")
             # Avance después de transformar exitosamente
             try:
                 self._set_progress(80)
-            except Exception:
-                pass
+                print("[DEBUG] Progreso establecido en 80%")
+            except Exception as e:
+                print(f"[DEBUG ERROR] Error al establecer progreso 80%: {e}")
             
             # Guardar en archivo temporal
+            print("[DEBUG] Guardando en archivo temporal")
             temp_dir = tempfile.gettempdir()
             ruta_temp = os.path.join(temp_dir, nombre_descarga)
+            print(f"[DEBUG] Ruta temporal: {ruta_temp}")
             
             wb_resultado.save(ruta_temp)
+            print("[DEBUG] Archivo guardado")
             try:
                 self._set_progress(90)
-            except Exception:
-                pass
+                print("[DEBUG] Progreso establecido en 90%")
+            except Exception as e:
+                print(f"[DEBUG ERROR] Error al establecer progreso 90%: {e}")
             
             # Establecer archivo para descargar con nombre sugerido
+            print("[DEBUG] Estableciendo archivo para descargar")
             try:
                 if hasattr(self.vista, 'establecer_archivo_resultado'):
+                    print("[DEBUG] Vista tiene 'establecer_archivo_resultado'")
                     self._en_ui(self.vista.establecer_archivo_resultado, ruta_temp, nombre_descarga)
                 elif hasattr(self.vista, 'set_archivo_resultado_temp'):
+                    print("[DEBUG] Vista tiene 'set_archivo_resultado_temp'")
                     self._en_ui(self.vista.set_archivo_resultado_temp, ruta_temp, nombre_descarga)
-            except Exception:
-                pass
+                else:
+                    print("[DEBUG] Vista no tiene ninguno de los métodos")
+            except Exception as e:
+                print(f"[DEBUG ERROR] Error al establecer archivo resultado: {e}")
+            
             # Resaltar descarga y bloquear transformar
+            print("[DEBUG] Resaltando botón descargar")
             try:
                 try:
                     self._en_ui(self.vista.resaltar_descargar)
-                except Exception:
+                    print("[DEBUG] resaltar_descargar ejecutado")
+                except Exception as e1:
+                    print(f"[DEBUG] resaltar_descargar no disponible: {e1}")
                     try:
                         self._en_ui(self.vista.highlight_descargar)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                        print("[DEBUG] highlight_descargar ejecutado")
+                    except Exception as e2:
+                        print(f"[DEBUG] highlight_descargar no disponible: {e2}")
+            except Exception as e:
+                print(f"[DEBUG ERROR] Error resaltando: {e}")
             
             self._add_msg(f"✓ Archivo preparado: {nombre_descarga}\n")
             self._add_msg("\nHaz clic en 'Descargar Resultado' para elegir dónde guardarlo\n")
             self._add_msg("\n🎉 ¡Transformación completada exitosamente!\n")
+            print("[DEBUG] Mensajes finales añadidos")
             try:
                 self._set_progress(100)
-            except Exception:
-                pass
+                print("[DEBUG] Progreso establecido en 100%")
+            except Exception as e:
+                print(f"[DEBUG ERROR] Error al establecer progreso 100%: {e}")
             
         except Exception as e:
             import traceback
