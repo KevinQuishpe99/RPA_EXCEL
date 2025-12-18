@@ -9,16 +9,6 @@ CONFIGURACION_POLIZAS = {
         'descripcion': 'Póliza DV (5852 u otros)',
         'hoja_origen_requerida': 'Report_AseguradoraMensual',  # Nombre de hoja en 413
     },
-    'TC': {
-        'prefijo': 'TC',
-        'nombre_archivo': 'Facturación TC',
-        'patrones_hoja': [r'T\+C', r'TC', r'5924'],
-        'descripcion': 'Póliza T+C (5924)',
-        'hoja_origen_requerida': 'Report_AseguradoraSaldos_COVID',
-        'numero_poliza_fijo': '5924',
-        'nombre_producto_fijo': 'SALDO DE DEUDA T + C',
-        'pais_residencia_fijo': '239',
-    },
     # ==================================================================
     # Agregar nuevas pólizas aquí:
     # ==================================================================

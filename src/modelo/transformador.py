@@ -13,7 +13,6 @@ from datetime import datetime
 # Importar módulos especializados
 from .estilos import EstilosExcel
 from .mapeo_columnas import obtener_mapeo_columnas
-from .mapeo_tc import MAPEO_TC_MANUAL, NO_SOBRESCRIBIR_TC, CAMPOS_FIJOS_TC
 from .transferencia_datos import TransferenciaDatos
 from .totales_pie import agregar_totales_columnas, agregar_pie_pagina, limpiar_bordes_todas_filas_excepto_pie
 from .tabla_dinamica import crear_hoja2_tabla_dinamica
@@ -53,14 +52,11 @@ class TransformadorDatos:
             self.enviar_mensaje("=" * 80)
             self.enviar_mensaje("Leyendo archivo origen...")
             
-            # Leer archivo origen según póliza
-            hoja_origen = None
-            if poliza_info and isinstance(poliza_info, dict):
-                hoja_origen = poliza_info.get('hoja_origen_requerida')
-            if not hoja_origen:
-                # Fallback compatible con DV (413)
-                hoja_origen = "Report_AseguradoraMensual"
-
+            # Obtener nombre de hoja requerida de la config
+            hoja_origen = poliza_info.get('hoja_origen_requerida', 'Report_AseguradoraMensual') if isinstance(poliza_info, dict) else 'Report_AseguradoraMensual'
+            print(f"[DEBUG] Leyendo hoja: {hoja_origen}")
+            
+            # Leer archivo origen
             df_origen = pd.read_excel(
                 archivo_origen,
                 sheet_name=hoja_origen,
@@ -93,27 +89,16 @@ class TransformadorDatos:
             ws = wb[hoja_destino]
             self.enviar_mensaje(f"✓ Usando hoja: {hoja_destino}")
             
-            # Encontrar fila de encabezados destino (dinámicamente)
-            fila_encabezados_destino = self.encontrar_fila_encabezados_destino(ws)
-            fila_datos_destino = fila_encabezados_destino + 1
-            
             # Obtener headers destino
-            headers_destino = list(ws[fila_encabezados_destino])
+            headers_destino = list(ws[5])
             
             # Mapear columnas
-            # Para TC, usar mapeo manual más preciso
-            if poliza_info and poliza_info.get('prefijo') == 'TC':
-                # Usar mapeo manual específico para TC
-                mapeo = MAPEO_TC_MANUAL.copy()
-                self.enviar_mensaje(f"✓ Usando mapeo manual TC")
-            else:
-                # Para DV, usar mapeo inteligente automático
-                mapeo = obtener_mapeo_columnas(
-                    headers_origen,
-                    headers_destino,
-                    self._cache_mapeo_columnas,
-                    self._cache_headers_destino
-                )
+            mapeo = obtener_mapeo_columnas(
+                headers_origen,
+                headers_destino,
+                self._cache_mapeo_columnas,
+                self._cache_headers_destino
+            )
             
             # Actualizar cache
             self._cache_mapeo_columnas = mapeo.copy()
@@ -122,26 +107,12 @@ class TransformadorDatos:
             self.enviar_mensaje(f"✓ {len(mapeo)} columnas mapeadas")
             
             # Limpiar datos existentes
-            self.limpiar_datos_destino(ws, fila_inicio=fila_datos_destino)
+            self.limpiar_datos_destino(ws)
             
-            # Completar poliza_info con valores fijos para TC
-            if poliza_info and poliza_info.get('prefijo') == 'TC':
-                # Asegurar que tiene los campos esperados por _aplicar_campos_fijos_tc
-                poliza_info = dict(poliza_info)  # Hacer copia para no modificar original
-                if 'numero_poliza_fijo' not in poliza_info:
-                    poliza_info['numero_poliza_fijo'] = poliza_info.get('numero')
-                if 'nombre_producto_fijo' not in poliza_info:
-                    poliza_info['nombre_producto_fijo'] = poliza_info.get('nombre')
-                if 'pais_residencia_fijo' not in poliza_info:
-                    poliza_info['pais_residencia_fijo'] = poliza_info.get('pais_residencia')
-            
-            # Transferir datos con parámetros dinámicos
+            # Transferir datos
             filas_procesadas = self.transferencia.transferir_datos(
                 ws, df_origen, fila_encabezados_origen,
-                headers_origen, headers_destino, mapeo, self.enviar_mensaje,
-                fila_destino_inicio=fila_datos_destino,
-                fila_plantilla=fila_datos_destino,
-                poliza_info=poliza_info
+                headers_origen, mapeo, self.enviar_mensaje
             )
             
             self.enviar_mensaje(f"✓ {filas_procesadas} filas procesadas")
@@ -200,9 +171,9 @@ class TransformadorDatos:
         
         return wb.sheetnames[0]
     
-    def limpiar_datos_destino(self, ws, fila_inicio=6):
+    def limpiar_datos_destino(self, ws):
         """Limpia datos existentes en hoja destino"""
-        for row in ws.iter_rows(min_row=fila_inicio, max_row=ws.max_row):
+        for row in ws.iter_rows(min_row=6, max_row=ws.max_row):
             for cell in row:
                 if not isinstance(cell, MergedCell) and cell.data_type != 'f':
                     cell.value = None
@@ -233,15 +204,6 @@ class TransformadorDatos:
                 continue
         
         return datetime.now()
-    
-    def encontrar_fila_encabezados_destino(self, ws):
-        """Encuentra la fila de encabezados en la plantilla destino"""
-        for fila_idx in range(1, min(20, ws.max_row + 1)):
-            row = ws[fila_idx]
-            texto_fila = ' '.join([str(c.value or '').upper() for c in row])
-            if 'PRIMER APELLIDO' in texto_fila and 'TIPO IDENTIFICACION' in texto_fila:
-                return fila_idx
-        return 5  # Por defecto fila 5 si no encuentra
     
     def generar_nombre_archivo(self, poliza_info, fecha_mes):
         """Genera el nombre del archivo resultado"""
