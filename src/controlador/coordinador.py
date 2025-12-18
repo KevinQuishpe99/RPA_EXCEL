@@ -12,6 +12,12 @@ from src.modelo import (
 )
 from src.config.polizas import CONFIGURACION_POLIZAS, TRANSFORMACIONES
 
+# Qt helper for thread-safe UI updates (no-op if Qt is not available)
+try:
+    from PySide6.QtCore import QTimer
+except Exception:
+    QTimer = None
+
 
 class CoordinadorPrincipal:
     """Coordinador principal - orquesta Model y View"""
@@ -65,6 +71,14 @@ class CoordinadorPrincipal:
         
         # Buscar plantilla
         self._buscar_plantilla()
+
+    # ===== Helpers =====
+    def _en_ui(self, func, *args, **kwargs):
+        """Ejecuta un callable en el hilo de UI si QTimer está disponible."""
+        if QTimer:
+            QTimer.singleShot(0, lambda: func(*args, **kwargs))
+        else:
+            func(*args, **kwargs)
     
     def _crear_polizas(self):
         """Crea instancias de pólizas desde configuración"""
@@ -216,11 +230,11 @@ class CoordinadorPrincipal:
                             f"Hojas encontradas: {', '.join(nombres_hojas)}\n\n"
                             f"Para DV (5852) se espera un archivo 413. Para TC (5924) se espera un archivo 455."
                         )
-                        self.vista.mostrar_error("Hoja requerida no encontrada", msg)
+                        self._en_ui(self.vista.mostrar_error, "Hoja requerida no encontrada", msg)
                         # Re-habilitar controles y abortar
                         try:
                             if hasattr(self.vista, 'habilitar_controles'):
-                                self.vista.habilitar_controles(True)
+                                self._en_ui(self.vista.habilitar_controles, True)
                         except Exception:
                             pass
                         return
@@ -253,18 +267,18 @@ class CoordinadorPrincipal:
             # Establecer archivo para descargar con nombre sugerido
             try:
                 if hasattr(self.vista, 'establecer_archivo_resultado'):
-                    self.vista.establecer_archivo_resultado(ruta_temp, nombre_descarga)
+                    self._en_ui(self.vista.establecer_archivo_resultado, ruta_temp, nombre_descarga)
                 elif hasattr(self.vista, 'set_archivo_resultado_temp'):
-                    self.vista.set_archivo_resultado_temp(ruta_temp, nombre_descarga)
+                    self._en_ui(self.vista.set_archivo_resultado_temp, ruta_temp, nombre_descarga)
             except Exception:
                 pass
             # Resaltar descarga y bloquear transformar
             try:
                 try:
-                    self.vista.resaltar_descargar()
+                    self._en_ui(self.vista.resaltar_descargar)
                 except Exception:
                     try:
-                        self.vista.highlight_descargar()
+                        self._en_ui(self.vista.highlight_descargar)
                     except Exception:
                         pass
             except Exception:
@@ -283,14 +297,14 @@ class CoordinadorPrincipal:
             error_detalle = traceback.format_exc()
             self._add_msg(f"\n✗ Error: {str(e)}\n")
             self._add_msg(f"\nDetalle:\n{error_detalle}\n")
-            self.vista.mostrar_error("Error", str(e))
+            self._en_ui(self.vista.mostrar_error, "Error", str(e))
             try:
                 self._set_progress(0)
             except Exception:
                 pass
             # Habilitar controles en caso de error
             try:
-                self.vista.habilitar_controles(True)
+                self._en_ui(self.vista.habilitar_controles, True)
             except Exception:
                 pass
     
@@ -348,18 +362,18 @@ class CoordinadorPrincipal:
     def _add_msg(self, msg):
         try:
             if hasattr(self.vista, 'agregar_mensaje'):
-                self.vista.agregar_mensaje(msg)
+                self._en_ui(self.vista.agregar_mensaje, msg)
             elif hasattr(self.vista, 'add_message'):
-                self.vista.add_message(msg)
+                self._en_ui(self.vista.add_message, msg)
         except Exception:
             pass
 
     def _set_progress(self, value):
         try:
             if hasattr(self.vista, 'establecer_progreso'):
-                self.vista.establecer_progreso(value)
+                self._en_ui(self.vista.establecer_progreso, value)
             elif hasattr(self.vista, 'set_progress'):
-                self.vista.set_progress(value)
+                self._en_ui(self.vista.set_progress, value)
         except Exception:
             pass
             

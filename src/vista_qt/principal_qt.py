@@ -234,8 +234,18 @@ class VentanaPrincipalQt(QWidget):
     def set_polizas(self, nombres):
         self.combo_tipo.clear()
         self.combo_tipo.addItem("Seleccionar tipo de archivo...")  # Placeholder
-        self.combo_tipo.addItems(nombres)
+
+
+        #self.combo_tipo.addItems(nombres)
+       # self.combo_tipo.setCurrentIndex(0)  # Mostrar placeholder por defecto
+       #--
+        # Mostrar solo DV; ocultar TC temporalmente
+        for nombre in nombres:
+            if "tc" in nombre.lower():
+                continue
+            self.combo_tipo.addItem(nombre)
         self.combo_tipo.setCurrentIndex(0)  # Mostrar placeholder por defecto
+        #------
 
     def set_archivo_resultado_temp(self, ruta, nombre_sugerido=None):
         self.ruta_temporal_resultado = ruta
